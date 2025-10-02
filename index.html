@@ -1,0 +1,521 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>Mini-game — Bão Mặt Trời</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Roboto+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --ui-bg: rgba(6,10,18,0.72);
+      --ui-border: rgba(255,255,255,0.08);
+      --accent: #ffcc00;
+      --muted: #aab3c2;
+    }
+    html,body{height:100%; margin:0; background: radial-gradient(circle at 40% 10%, #021026, #000814 60%); font-family: 'Roboto Mono', monospace; color:#e6eef6; -webkit-font-smoothing:antialiased;}
+    canvas{display:block; margin:0 auto; background: transparent;}
+    /* UI box (góc trái) */
+    #ui {
+      position: absolute;
+      top: 14px;
+      left: 14px;
+      width: 260px;
+      background: var(--ui-bg);
+      border: 1px solid var(--ui-border);
+      padding: 12px 14px;
+      border-radius: 8px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.02);
+      backdrop-filter: blur(4px);
+      z-index: 50;
+    }
+    #ui h2{
+      margin:0 0 8px 0;
+      font-family: 'Orbitron', sans-serif;
+      font-size:15px;
+      color: var(--accent);
+      letter-spacing: 0.5px;
+    }
+    #ui .line{font-size:13px; color:#dfe9ff; margin:6px 0; line-height:1.4;}
+    #ui .muted{color:var(--muted); font-size:12px;}
+    #ui .controls{margin-top:8px; font-size:12px; color:#cbd7ef;}
+    /* tip footer */
+    #tip{
+      position: absolute;
+      bottom: 8px;
+      left: 10px;
+      font-size: 12px;
+      color: #9fb0d1;
+      z-index: 50;
+      background: rgba(0,0,0,0.2);
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.03);
+    }
+    /* Gameover modal */
+    #gameover {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%,-50%);
+      z-index: 80;
+      display: none;
+      width: 380px;
+      text-align: center;
+      background: linear-gradient(180deg, rgba(0,0,0,0.72), rgba(0,0,0,0.84));
+      border-radius: 10px;
+      border: 1px solid rgba(255,64,64,0.12);
+      padding: 22px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.7);
+      color: #ffdfe0;
+      font-family: 'Orbitron', sans-serif;
+    }
+    #gameover p { margin: 6px 0; font-size: 20px; }
+    #gameover button {
+      margin-top: 12px;
+      padding: 10px 18px;
+      border-radius: 8px;
+      border: none;
+      background: #ff4040;
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: 'Orbitron', sans-serif;
+      box-shadow: 0 6px 18px rgba(255,64,64,0.16);
+    }
+    #gameover button:hover { transform: translateY(-2px); }
+
+    /* responsive canvas container */
+    #gameWrap{ position: absolute; inset:0; display:flex; justify-content:center; align-items:center; }
+  </style>
+</head>
+<body>
+  <div id="ui" aria-hidden="false">
+    <h2>Bão Mặt Trời ☀ — Bảo vệ Trái Đất</h2>
+    <div class="line">Điểm: <strong id="score">0</strong></div>
+    <div class="line">Sức mạnh: <strong id="power">100%</strong></div>
+    <div class="line">Vệ tinh: <strong id="sats">3</strong></div>
+    <div class="line">Khiên chắn: <strong id="wave">1</strong></div>
+    <div class="muted">Phím: ← → / A D — Di chuyển khiên chắn, Space — Bắn</div>
+  </div>
+
+  <div id="tip">Mẹo: Dùng khiên chắn các hạt lửa cam hoặc bắn hạ chúng. Nhặt pin vàng để hồi sức mạnh.</div>
+
+  <div id="gameover" role="dialog" aria-label="Game Over">
+    <p style="font-size:26px; color:#ffb6b6;">GAME OVER!</p>
+    <p style="font-size:14px; color:#ffdfe0; margin-top:6px;">Sức mạnh đã hết (0%) hoặc vệ tinh đã bị phá hủy.</p>
+    <button id="btnRestart">Chơi lại</button>
+  </div>
+
+  <div id="gameWrap">
+    <canvas id="game"></canvas>
+  </div>
+
+<script>
+/* Full game in single file — copy chạy ngay */
+
+/* Canvas setup & resize */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+function resize(){
+  canvas.width = Math.max(900, window.innerWidth - 80);
+  canvas.height = Math.max(560, window.innerHeight - 160);
+  // reposition player bottom
+  if (state && state.player) state.player.y = canvas.height - 60;
+  layoutSatellites();
+}
+window.addEventListener('resize', resize);
+
+/* UI elements */
+const elScore = document.getElementById('score');
+const elPower = document.getElementById('power');
+const elSats  = document.getElementById('sats');
+const elWave  = document.getElementById('wave');
+const elGameOver = document.getElementById('gameover');
+const btnRestart = document.getElementById('btnRestart');
+
+/* Game state init */
+let state = null;
+function layoutSatellites(){
+  if (!state) return;
+  const baseY = Math.round(Math.max(120, Math.min(180, canvas.height * 0.25)));
+  const leftX = Math.round(canvas.width * 0.25);
+  const midX  = Math.round(canvas.width * 0.5);
+  const rightX = Math.round(canvas.width * 0.75);
+  state.satellites = [
+    { x: leftX,  y: baseY, r: 18, shield: 100, alive: true, angle: 0 },
+    { x: midX,   y: baseY-20, r: 18, shield: 100, alive: true, angle: 0 },
+    { x: rightX, y: baseY, r: 18, shield: 100, alive: true, angle: 0 }
+  ];
+}
+function initState(){
+  state = {
+    running: true,
+    score: 0,
+    power: 100,
+    wave: 1,
+    frame: 0,
+    spawnInterval: 900,
+    batteryInterval: 7000,
+    player: { w: 250, h: 15, x: (canvas.width-140)/2, y: canvas.height - 60, speed: 30 },
+    bullets: [],
+    flares: [],
+    batteries: [],
+    particles: [],
+    canShoot: true,
+    satellites: []
+  };
+  layoutSatellites();
+  elGameOver.style.display = 'none';
+  resize();
+  updateUI();
+}
+initState();
+
+/* Input */
+const keys = {};
+window.addEventListener('keydown', (e)=> {
+  keys[e.key] = true;
+  if ((e.key === ' ' || e.code === 'Space') && state.running && state.canShoot){
+    e.preventDefault();
+    shoot();
+  }
+});
+window.addEventListener('keyup', (e)=> keys[e.key] = false);
+
+/* Spawn functions */
+function spawnFlare(){
+  const size = 14 + Math.random()*18;
+  state.flares.push({
+    x: Math.random()*(canvas.width-40)+20,
+    y: -size - 10,
+    size,
+    power: 4 + Math.random()*10,
+    vy: 2 + Math.random()*1.8,
+    dead: false
+  });
+}
+function spawnBattery(){
+  state.batteries.push({
+    x: Math.random()*(canvas.width-60)+30,
+    y: -18,
+    size: 14,
+    vy: 1.6,
+    dead: false
+  });
+}
+
+/* Timers */
+let flareTimer = setInterval(()=>{ if(state.running) spawnFlare(); }, 900);
+let batteryTimer = setInterval(()=>{ if(state.running) spawnBattery(); }, 7000);
+
+/* Shooting */
+function shoot(){
+  state.bullets.push({
+    x: state.player.x + state.player.w/2,
+    y: state.player.y - 8,
+    r: 6,
+    vy: -10,
+    dead: false
+  });
+  state.canShoot = false;
+  setTimeout(()=> state.canShoot = true, 220);
+}
+
+/* Helper collision */
+function circleCollide(ax,ay,ar, bx,by,br){
+  const dx = ax-bx, dy = ay-by;
+  return dx*dx + dy*dy <= (ar + br)*(ar + br);
+}
+
+/* Particles */
+function spawnHitParticles(x,y,color){
+  for (let i=0;i<10;i++){
+    state.particles.push({
+      x, y,
+      vx: (Math.random()-0.5) * 4,
+      vy: (Math.random()-0.8) * 4,
+      life: 18 + Math.random()*8,
+      color
+    });
+  }
+}
+function updateParticles(){
+  state.particles.forEach(p=>{
+    p.x += p.vx; p.y += p.vy; p.vy += 0.08; p.life--;
+  });
+  state.particles = state.particles.filter(p=>p.life>0);
+}
+
+/* Update (logic) */
+function update(){
+  if (!state.running) return;
+
+  // Player movement
+  if (keys['ArrowLeft'] || keys['a'] || keys['A']) state.player.x -= state.player.speed;
+  if (keys['ArrowRight'] || keys['d'] || keys['D']) state.player.x += state.player.speed;
+  if (state.player.x < 6) state.player.x = 6;
+  if (state.player.x > canvas.width - state.player.w - 6) state.player.x = canvas.width - state.player.w - 6;
+
+  // Bullets update + collision with flares
+  state.bullets.forEach(b=> b.y += b.vy);
+  state.bullets.forEach(b=>{
+    state.flares.forEach(f=>{
+      if (!b.dead && !f.dead && circleCollide(b.x,b.y,b.r, f.x,f.y,f.size)){
+        b.dead = true; f.dead = true;
+        state.score += 15;
+        spawnHitParticles(f.x,f.y,'#ffaa66');
+      }
+    });
+  });
+
+  // Flares update
+  state.flares.forEach(f=>{
+    f.y += f.vy + (state.wave - 1) * 0.07;
+    // hit player paddle
+    if (!f.dead && f.y + f.size > state.player.y && f.x > state.player.x && f.x < state.player.x + state.player.w){
+      f.dead = true;
+      state.score += 10;
+      spawnHitParticles(f.x,f.y,'#ffddaa');
+    }
+  });
+
+  // Flares hit satellites (approx belt)
+  state.flares.forEach(f=>{
+    if (f.dead) return;
+    if (f.y > 100 && f.y < 220){
+      state.satellites.forEach(s=>{
+        if (!s.alive) return;
+        if (circleCollide(f.x,f.y,f.size, s.x,s.y, s.r)){
+          f.dead = true;
+          // damage shield first
+          if (s.shield > 0){
+            s.shield -= Math.max(24, Math.floor(f.power));
+            if (s.shield < 0) s.shield = 0;
+            state.score = Math.max(0, state.score - 5);
+          } else {
+            s.alive = false;
+            state.score = Math.max(0, state.score - 50);
+            state.power = Math.max(0, state.power - 12);
+            spawnHitParticles(s.x, s.y, '#ff8899');
+          }
+        }
+      });
+    }
+  });
+
+  // flares reach bottom -> damage power
+  state.flares.forEach(f=>{
+    if (!f.dead && f.y + f.size >= canvas.height - 12){
+      f.dead = true;
+      state.power = Math.max(0, state.power - Math.ceil(f.power));
+      state.score = Math.max(0, state.score - Math.floor(f.power*2));
+      spawnHitParticles(f.x, canvas.height - 40, '#ff9966');
+    }
+  });
+
+  // batteries update & collect
+  state.batteries.forEach(b=>{
+    b.y += b.vy;
+    if (!b.dead && b.y + b.size > state.player.y && b.x > state.player.x && b.x < state.player.x + state.player.w){
+      b.dead = true;
+      state.power = Math.min(100, state.power + 20);
+      state.score += 20;
+      spawnHitParticles(b.x, b.y, '#ccff88');
+    }
+  });
+
+  // regenerate satellite shields slowly
+  state.satellites.forEach(s=>{
+    if (!s.alive) return;
+    if (s.shield < 100){
+      s.shield += 0.03; // tweak this for speed
+      if (s.shield > 100) s.shield = 100;
+    }
+  });
+
+  // clean up
+  state.flares = state.flares.filter(f => !f.dead && f.y < canvas.height + 80);
+  state.batteries = state.batteries.filter(b => !b.dead && b.y < canvas.height + 80);
+  state.bullets = state.bullets.filter(b => !b.dead && b.y > -40);
+
+  // wave progression
+  state.frame++;
+  if (state.frame % 1200 === 0){
+    state.wave++;
+    if (state.spawnInterval > 380){
+      state.spawnInterval = Math.max(380, state.spawnInterval - 40);
+      clearInterval(flareTimer);
+      flareTimer = setInterval(()=>{ if(state.running) spawnFlare(); }, state.spawnInterval);
+    }
+  }
+
+  // check death
+  const aliveSats = state.satellites.filter(s=>s.alive).length;
+  if (state.power <= 0 || aliveSats <= 0){
+    endGame(state.power <= 0 ? 'Power grid đã cạn.' : 'Vệ tinh đã bị phá hủy.');
+  }
+
+  updateParticles();
+  updateUI();
+}
+
+/* Draw */
+function draw(){
+  // background
+  const g = ctx.createLinearGradient(0,0,0,canvas.height);
+  g.addColorStop(0, '#00101a');
+  g.addColorStop(1, '#000814');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // stars (subtle)
+  for (let i=0;i<28;i++){
+    ctx.fillStyle = 'rgba(255,255,255,0.02)';
+    ctx.fillRect(Math.random()*canvas.width, Math.random()*canvas.height, 1,1);
+  }
+
+  // Earth partial
+  ctx.save();
+  ctx.globalAlpha = 0.95;
+  ctx.fillStyle = '#113366';
+  ctx.beginPath();
+  ctx.arc(canvas.width/2, canvas.height + 220, 360, Math.PI, 2*Math.PI);
+  ctx.fill();
+  ctx.restore();
+
+  // satellites
+  state.satellites.forEach(s=>{
+    if (!s.alive) return;
+    // body
+    ctx.beginPath();
+    ctx.fillStyle = '#8b8d90';
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+    ctx.fill();
+    // shield ring alpha depends on shield %
+    if (s.shield > 0){
+      const alpha = 0.18 + (s.shield/100) * 0.6;
+      ctx.beginPath();
+      ctx.strokeStyle = `rgba(0,200,255,${alpha.toFixed(2)})`;
+      ctx.lineWidth = 4;
+      ctx.arc(s.x, s.y, s.r + 8, 0, Math.PI*2);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(255,80,80,0.9)';
+      ctx.lineWidth = 2;
+      ctx.arc(s.x, s.y, s.r + 8, 0.3, Math.PI/1.6);
+      ctx.stroke();
+    }
+    // shield percent small text
+    ctx.fillStyle = '#cfefff';
+    ctx.font = '12px monospace';
+    ctx.fillText(Math.floor(s.shield) + '%', s.x - 12, s.y - s.r - 12);
+  });
+
+  // player paddle
+  ctx.save();
+  ctx.shadowColor = 'rgba(51,255,255,0.35)';
+  ctx.shadowBlur = 18;
+  ctx.fillStyle = '#33ffff';
+  ctx.fillRect(state.player.x, state.player.y, state.player.w, state.player.h);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+
+  // bullets
+  ctx.fillStyle = '#bffaff';
+  state.bullets.forEach(b=>{
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+    ctx.fill();
+  });
+
+  // flares
+  state.flares.forEach(f=>{
+    ctx.beginPath();
+    const grad = ctx.createRadialGradient(f.x, f.y, 1, f.x, f.y, f.size*1.6);
+    grad.addColorStop(0, 'rgba(255,220,150,1)');
+    grad.addColorStop(0.25, 'rgba(255,160,80,0.95)');
+    grad.addColorStop(0.7, 'rgba(220,80,20,0.6)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.arc(f.x, f.y, f.size, 0, Math.PI*2);
+    ctx.fill();
+  });
+
+  // batteries
+  state.batteries.forEach(b=>{
+    ctx.save();
+    ctx.fillStyle = '#ffd84d';
+    ctx.fillRect(b.x - 9, b.y - 8, b.size, b.size);
+    ctx.fillStyle = '#b37f00';
+    ctx.fillRect(b.x - 6, b.y - 6, 6, b.size - 4);
+    ctx.restore();
+  });
+
+  // particles
+  state.particles.forEach(p=>{
+    ctx.globalAlpha = Math.max(0.12, Math.min(1, p.life / 28));
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x, p.y, 2, 2);
+    ctx.globalAlpha = 1;
+  });
+
+  // bottom hint bar
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.fillRect(8, canvas.height - 28, canvas.width - 16, 24);
+  ctx.fillStyle = '#9fb0d1';
+  ctx.font = '12px monospace';
+  ctx.fillText('Mẹo: bắn pulse vào các hạt màu cam. Nhặt battery (vàng) để hồi power.', 16, canvas.height - 10);
+  ctx.restore();
+}
+
+/* UI update */
+function updateUI(){
+  elScore.textContent = state.score;
+  elPower.textContent = Math.floor(state.power) + '%';
+  elWave.textContent = state.wave;
+  elSats.textContent = state.satellites.filter(s=>s.alive).length;
+}
+
+/* End game */
+function endGame(reason){
+  state.running = false;
+  elGameOver.style.display = 'block';
+  if (reason) {
+    const rEl = document.getElementById('gameover').querySelector('p:nth-child(2)');
+    if (rEl) rEl.textContent = reason;
+  }
+}
+
+/* Restart */
+btnRestart.addEventListener('click', ()=>{
+  state.score = 0;
+  state.power = 100;
+  state.wave = 1;
+  state.frame = 0;
+  state.flares = [];
+  state.batteries = [];
+  state.bullets = [];
+  state.particles = [];
+  state.canShoot = true;
+  state.running = true;
+  layoutSatellites();
+  elGameOver.style.display = 'none';
+});
+
+/* Main loop */
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+/* Start everything */
+resize();
+loop();
+
+</script>
+</body>
+</html>
+
